@@ -33,13 +33,14 @@ def add_client(connection, first_name, last_name, email=None, phones: list[str] 
     :param first_name: Имя клиента
     :param last_name: Фамилия
     :param email: Адрес почты (должен быть уникальным)
-    :param phone: список yомеров телефонов
+    :param phones: список номеров телефонов
     :return:
     """
     with connection.cursor() as cur:
         cur.execute("INSERT INTO clients.client(first_name, second_name, email) "
                     "VALUES (%s, %s, %s) RETURNING id;", (first_name, last_name, email))
         user_id = cur.fetchone()
+        print(f"Создан пользователь id: {user_id[0]}")
         if not phones:
             return user_id
         else:
@@ -62,6 +63,7 @@ def add_phone(connection, client_id: int, phone: str):
         cur.execute(f"INSERT INTO clients.phones(user_id, phone) "
                     f"VALUES (%s, %s);", (client_id, phone))
         connection.commit()
+        print(f"Для пользователя id {client_id} добавлен телефон {phone}")
 
 
 def change_client(connection, client_id, first_name: str = None,
@@ -91,21 +93,27 @@ def change_client(connection, client_id, first_name: str = None,
             cur.execute("UPDATE clients.phones "
                         "SET phone =%s WHERE user_id = %s and phone = %s", (new_phone, client_id, old_phone))
         connection.commit()
+        print(f"Данные пользоватея {client_id} изменены")
 
 
-def delete_phone(connection, client_id, phone):
-    base = "DELETE FROM clients.phones"
+def delete_phone(connection, client_id, phone=None):
+    base = "DELETE FROM clients.phones "
     with connection.cursor() as cur:
-        cur.execute(base + "WHERE client.user_id = %s and client.phone = %s", (client_id, phone))
+        if phone:
+            cur.execute(base + "WHERE phones.user_id = %s and phones.phone = %s", (client_id, phone))
+            print(f"Телефон {phone} для пользователя {client_id} удален")
+        else:
+            cur.execute(base + "WHERE phones.user_id = %s", (client_id,))
         connection.commit()
 
 
 def delete_client(connection, client_id):
+    delete_phone(connection, client_id)
     base = "DELETE FROM clients.client "
-    join = "LEFT JOIN clients.phones on client.id = phones.user_id "
     with connection.cursor() as cur:
-        cur.execute(base + join + "WHERE client.id = %s", (client_id,))
+        cur.execute(base + "WHERE client.id = %s", (client_id,))
         connection.commit()
+    print(f"Клиент {client_id} удален")
 
 
 def find_client(connection, first_name=None, last_name=None, email=None, phone=None):
@@ -148,9 +156,48 @@ def post_found_user(found_data):
         return title_text + payload
 
 
-
 if __name__ == "__main__":
-    with psycopg2.connect(database="clients_db", user="postgres", password="wisla") as conn:
-    # print(add_client(conn, '35', 'cdf', 'axcadzc@zxcasda.ru',
-    #                  ['8-913-789-36-06', '8-913-789-37-07']))
-        print(post_found_user(find_client(conn, email='axcadzc@zxcasda.ru')))
+    with psycopg2.connect(host="192.168.14.141", database="clients_db", user="wisla", password="wisla") as conn:
+        create_db(conn)  # создание схемы и таблиц
+        # создание пользователя без номеров телефона
+        add_client(conn, 'Первый', 'Пользователь', 'first@user.ru')
+        # создание пользователя с 1 телефоном
+        add_client(conn, 'Второй', 'Пользователь',
+                         'second@user.ru', ['1-234-567-89-10'])
+        # создание пользователя с n телефонами
+        add_client(conn, 'Третий', 'Пользователь',
+                         'third@user.ru', ['1-234-567-89-11', '1-131-415-16-17'])
+        # добавление телефона пользователю
+        print("----")
+        print(post_found_user(find_client(conn, email='first@user.ru')))
+        print("----")
+        add_phone(conn, 1, "0-987-654-32-10")
+        print("----")
+        print(post_found_user(find_client(conn, email='first@user.ru')))
+        print("----")
+        print("Изменение пользователя:")
+        print(post_found_user(find_client(conn, email='second@user.ru')))
+        change_client(conn, 2, last_name="Change last-name")
+        print(post_found_user(find_client(conn, email='second@user.ru')))
+        print("----")
+        print("Поиск:")
+        print('По номеру телефона:')
+        print(post_found_user(find_client(conn, phone='1-131-415-16-17')))
+        print("----")
+        print('По фамилии (найдено несколько записей)')
+        print(post_found_user(find_client(conn, last_name='Пользователь')))
+        print("----")
+        print('По Имени (без результата)')
+        print(post_found_user(find_client(conn, first_name='Пользователь')))
+        print(post_found_user(find_client(conn, email='third@user.ru')))
+        print('Удаление телефона')
+        print(post_found_user(find_client(conn, email='third@user.ru')))
+        delete_phone(conn, 3, '1-234-567-89-11')
+        print(post_found_user(find_client(conn, email='third@user.ru')))
+        print("----")
+        print("----")
+        print('Удаление клиента')
+        print(post_found_user(find_client(conn, email='third@user.ru')))
+        delete_client(conn, 3)
+
+
